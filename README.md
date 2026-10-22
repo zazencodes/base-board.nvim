@@ -1,10 +1,12 @@
 # base-board.nvim
 
 <p align="center">
+  <a href="https://github.com/zazencodes/base-board.nvim/releases/latest"><img src="https://img.shields.io/github/v/release/zazencodes/base-board.nvim" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="License: GPLv3"></a>
   <img src="https://img.shields.io/badge/Neovim-0.11%2B-57A143?logo=neovim&logoColor=white" alt="Neovim 0.11+">
   <img src="https://img.shields.io/badge/Obsidian-Bases-7C3AED?logo=obsidian&logoColor=white" alt="Obsidian Bases">
   <img src="https://img.shields.io/badge/Lua-2C2D72?logo=lua&logoColor=white" alt="Lua">
+  <a href="https://zazencodes.com/"><img src="https://img.shields.io/badge/made%20by-ZazenCodes-black" alt="Made by ZazenCodes"></a>
 </p>
 
 Kanban boards for Obsidian Bases in Neovim. Works with the same `.base` files and card order as the [Base Board](https://github.com/mderazon/obsidian-base-board) Obsidian plugin.
