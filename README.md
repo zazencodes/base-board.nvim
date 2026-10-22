@@ -11,6 +11,8 @@
 
 Kanban boards for Obsidian Bases in Neovim. Works with the same `.base` files and card order as the [Base Board](https://github.com/mderazon/obsidian-base-board) Obsidian plugin.
 
+https://github.com/user-attachments/assets/908110fe-8ee7-4c31-85dc-cd9572ae9fb8
+
 ## Install
 
 ```lua
