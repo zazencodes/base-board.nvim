@@ -6,7 +6,7 @@ base-board.nvim: Neovim plugin (Lua, no dependencies) that shows Obsidian `.base
 
 - Compatibility with the Obsidian Base Board plugin is the point. Card order (`kanban_order`), column order and filters must match what Base Board shows and writes. When in doubt, read Base Board's source (github.com/mderazon/obsidian-base-board).
 - Fail loudly with `error("base-board: ...", 0)` on anything unsupported (YAML syntax, filter expressions, nested frontmatter values). Do not add silent fallbacks.
-- User-facing changes (commands, keys, supported filters) must be reflected in `README.md`.
+- User-facing changes (commands, keys) must be reflected in `README.md`. Supported filters are documented at the top of `lua/base-board/filter.lua`.
 
 ## Layout
 

@@ -1,57 +1,48 @@
 # base-board.nvim
 
-Kanban boards for Obsidian Bases in Neovim, compatible with the
-[Base Board](https://github.com/mderazon/obsidian-base-board) Obsidian plugin.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="License: GPLv3"></a>
+  <img src="https://img.shields.io/badge/Neovim-0.11%2B-57A143?logo=neovim&logoColor=white" alt="Neovim 0.11+">
+  <img src="https://img.shields.io/badge/Obsidian-Bases-7C3AED?logo=obsidian&logoColor=white" alt="Obsidian Bases">
+  <img src="https://img.shields.io/badge/Lua-2C2D72?logo=lua&logoColor=white" alt="Lua">
+</p>
 
-It reads the `type: base-board` view of a `.base` file and draws its
-columns and cards in a buffer. Moving a card writes the same frontmatter Base
-Board writes (the group-by property and `kanban_order`), so the board stays in
-sync with Obsidian.
+Kanban boards for Obsidian Bases in Neovim. Works with the same `.base` files and card order as the [Base Board](https://github.com/mderazon/obsidian-base-board) Obsidian plugin.
+
+## Install
+
+```lua
+-- lazy.nvim
+{ "zazencodes/base-board.nvim", cmd = "BaseBoard" }
+```
 
 ## Usage
 
-`:BaseBoard [file]` opens the board for a `.base` file (default: the current
-buffer).
+`:BaseBoard` in a `.base` file opens its board.
 
 | Key | Action |
 | --- | --- |
 | `h` / `l` | previous / next column |
 | `j` / `k` | next / previous card |
-| `<CR>` | open the card's note |
-| `H` / `L` | move the card to the end of the previous / next column |
-| `J` / `K` | move the card down / up |
+| `<CR>` | open card |
+| `H` / `L` | move card to previous / next column |
+| `J` / `K` | move card down / up |
 | `r` | refresh |
-| `q` | close the board |
-| `?` | show these keys |
+| `q` | close |
+| `?` | show keys |
 
-The board refreshes whenever you return to it.
+## License
 
-## What it reads
+[GPLv3](LICENSE). You can use, modify and share this code, and any version you distribute must also be released under GPLv3.
 
-- **View:** the single view with `type: base-board`. More than one is an error.
-- **Columns:** values of `groupBy.property`, in `boardColumns` order, with any
-  other values appended. Notes without a value go in `(No value)`.
-- **Card order:** `kanban_order`, sorted and written the way Base Board does it
-  (fractional-indexing keys; legacy numeric values sort first and a column
-  holding them is renumbered when you reorder it).
-- **Card fields:** the properties in the view's `order`, labelled with
-  `displayName`. `tags` render as chips coloured by `tagColors`.
-- **Colours:** `columnColors` for column accents and card borders.
-- **Filters:** the file's and the view's `filters`, as `and` / `or` / `not`
-  groups of `file.inFolder("…")`, `<prop>.isEmpty()`,
-  `<prop> == <literal>`, `<prop> != <literal>` and `!<expr>`. Any other
-  expression is an error rather than a silently different board.
-
-## Install (lazy.nvim)
-
-```lua
-{ dir = "~/pro/base-board.nvim", cmd = "BaseBoard" }
-```
-
-Requires Neovim 0.11+. No dependencies.
-
-## Tests
-
-```sh
-nvim --clean --headless -l tests/run.lua
-```
+<p align="center">
+  <a href="https://zazencodes.com/?utm_source=github&utm_medium=referral&utm_campaign=base-board-nvim">
+    <img
+      src="docs/assets/zazencodes-banner.png"
+      alt="ZazenCodes — Engineering for the Agentic Era"
+      width="100%"
+    >
+  </a>
+  <br>
+  Created by <a href="https://zazencodes.com/">ZazenCodes</a>
+</p>
