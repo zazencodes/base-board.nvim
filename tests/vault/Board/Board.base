@@ -1,0 +1,31 @@
+filters:
+  and:
+    - file.inFolder("Board/tasks")
+    - file.ext == "md"
+properties:
+  note.post_date:
+    displayName: Post date
+views:
+  - type: base-board
+    name: Test Board
+    filters:
+      and:
+        - status != "Scrapped"
+        - '!status.isEmpty()'
+    groupBy:
+      property: status
+      direction: DESC
+    order:
+      - file.name
+      - status
+      - post_date
+      - tags
+    tagColors:
+      dedicated: "#d9cbed"
+    columnColors:
+      Backlog: "#858585"
+      Doing: "#9e2ff9"
+    boardColumns:
+      - Doing
+      - Backlog
+      - Done
