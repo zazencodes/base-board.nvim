@@ -338,6 +338,7 @@ function M.open(base_path)
     signcolumn = "no",
     list = false,
     cursorline = false,
+    spell = false,
     sidescrolloff = 0,
   }) do
     vim.wo[0][0][option] = value
