@@ -10,7 +10,7 @@ base-board.nvim: Neovim plugin (Lua, no dependencies) that shows Obsidian `.base
 
 ## Layout
 
-- `plugin/base-board.lua`: the `:BaseBoard` command only.
+- `plugin/base-board.lua`: the `:BaseBoard` toggle command and the autocmd that opens boards in place of their `.base` files.
 - `lua/base-board/yaml.lua`: block-style YAML subset parser for `.base` files and frontmatter.
 - `lua/base-board/filter.lua`: Bases filter evaluator.
 - `lua/base-board/order.lua`: port of Base Board's fractional-indexing order keys.

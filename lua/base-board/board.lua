@@ -56,13 +56,25 @@ local function sort_cards(cards)
   end)
 end
 
+local function board_views(base_path)
+  local base = yaml.parse(table.concat(vim.fn.readfile(base_path), "\n"))
+  return base, vim.tbl_filter(function(v)
+    return v.type == M.VIEW_TYPE
+  end, base.views or {})
+end
+
+--- Whether a `.base` file has a view with `type: base-board`.
+---@param base_path string
+---@return boolean
+function M.is_board(base_path)
+  local _, views = board_views(base_path)
+  return #views > 0
+end
+
 ---@param base_path string  absolute path to a `.base` file
 ---@return table board
 function M.load(base_path)
-  local base = yaml.parse(table.concat(vim.fn.readfile(base_path), "\n"))
-  local views = vim.tbl_filter(function(v)
-    return v.type == M.VIEW_TYPE
-  end, base.views or {})
+  local base, views = board_views(base_path)
   if #views ~= 1 then
     error(("base-board: %s needs exactly one view with type: %s (found %d)"):format(base_path, M.VIEW_TYPE, #views), 0)
   end

@@ -17,12 +17,12 @@ https://github.com/user-attachments/assets/1535d0ed-1b46-4262-a3a6-3dc37f5cc3b5
 
 ```lua
 -- lazy.nvim
-{ "zazencodes/base-board.nvim", cmd = "BaseBoard" }
+{ "zazencodes/base-board.nvim" }
 ```
 
 ## Usage
 
-`:BaseBoard` in a `.base` file opens its board.
+Opening a `.base` file that has a `type: base-board` view shows its board. `:BaseBoard` toggles between the board and the `.base` file. `:BaseBoard <path>` opens the board for another `.base` file.
 
 | Key | Action |
 | --- | --- |
