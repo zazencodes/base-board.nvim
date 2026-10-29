@@ -3,7 +3,7 @@ if vim.g.loaded_base_board then
 end
 vim.g.loaded_base_board = true
 
-local PREFIX = "base-board://"
+local PREFIX = require("base-board.view").PREFIX
 
 -- Shows the `.base` file itself; it stays YAML until the board is toggled on.
 local function show_yaml(base_path)
@@ -34,10 +34,23 @@ vim.api.nvim_create_user_command("BaseBoard", function(opts)
   show_board(path)
 end, { nargs = "?", complete = "file", desc = "Toggle the Base Board for a .base file" })
 
+local group = vim.api.nvim_create_augroup("base-board", {})
+
+-- Board buffers are rendered whenever Neovim reads them, so `:edit` and
+-- restored sessions show the board.
+vim.api.nvim_create_autocmd("BufReadCmd", {
+  group = group,
+  pattern = PREFIX .. "*",
+  callback = function(args)
+    require("base-board.view").load(args.buf)
+  end,
+})
+
 -- Boards open in place of their `.base` file.
 vim.api.nvim_create_autocmd("BufReadPost", {
-  group = vim.api.nvim_create_augroup("base-board", {}),
+  group = group,
   pattern = "*.base",
+  nested = true, -- so the board buffer's BufReadCmd runs
   callback = function(args)
     local path = vim.api.nvim_buf_get_name(args.buf)
     if vim.b[args.buf].base_board_off or not require("base-board.board").is_board(path) then

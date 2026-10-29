@@ -32,7 +32,7 @@ local function card_fields(base, view, group_by)
   local properties = base.properties or {}
   for _, prop in ipairs(view.order or {}) do
     local key = strip_note_prefix(prop)
-    if prop ~= "file.name" and key ~= group_by and key ~= order.PROPERTY then
+    if prop ~= "file.name" and key ~= group_by and key ~= order.PROPERTY and key ~= "tags" then
       if prop:match("^file%.") or prop:match("^formula%.") then
         error("base-board: card property " .. prop .. " is not supported", 0)
       end
@@ -41,6 +41,53 @@ local function card_fields(base, view, group_by)
     end
   end
   return fields
+end
+
+-- Base Board's colors for tags without a `tagColors` entry, picked by a hash
+-- of the tag name.
+local TAG_PALETTE = {
+  "#f87168", "#fbbc04", "#fcc934", "#34a853", "#4285f4",
+  "#a142f4", "#f442a1", "#20c997", "#fd7e14", "#6f42c1",
+}
+
+--- A note's tags, read like Base Board: `tags` (or `tag`) as a list or a
+--- comma-separated string, without leading `#`.
+---@param fm table frontmatter
+---@return string[]
+function M.tags(fm)
+  local value = fm.tags
+  if value == nil then
+    value = fm.tag
+  end
+  local tags = {}
+  if type(value) == "table" then
+    tags = vim.tbl_filter(function(t)
+      return type(t) == "string"
+    end, value)
+  elseif type(value) == "string" then
+    tags = vim.tbl_filter(function(t)
+      return t ~= ""
+    end, vim.tbl_map(vim.trim, vim.split(value, ",")))
+  end
+  return vim.tbl_map(function(t)
+    return (t:gsub("^#", ""))
+  end, tags)
+end
+
+--- The color Base Board shows for a tag.
+---@param board table
+---@param tag string
+---@return string
+function M.tag_color(board, tag)
+  if board.tag_colors[tag] then
+    return board.tag_colors[tag]
+  end
+  -- JavaScript's `hash = c + ((hash << 5) - hash)`, with its int32 shift.
+  local hash = 0
+  for _, c in ipairs(vim.fn.str2list(tag)) do
+    hash = c + (bit.lshift(hash, 5) - hash)
+  end
+  return TAG_PALETTE[math.abs(hash) % #TAG_PALETTE + 1]
 end
 
 local function sort_cards(cards)
@@ -93,7 +140,8 @@ function M.load(base_path)
 
   local root = vault.root(base_path)
   local by_column = {}
-  for _, note in ipairs(vault.notes(root)) do
+  -- Only notes inside a folder the filters require can match.
+  for _, note in ipairs(vault.notes(root, filter.required_folder(filters) or "")) do
     if filter.matches(filters, note) then
       local fm = note:frontmatter()
       local name = column_name(fm[group_by])

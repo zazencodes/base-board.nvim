@@ -63,17 +63,23 @@ local function new_note(root, rel)
 end
 
 ---@param root string
----@return table[]  every markdown note in the vault, skipping dot folders
-function M.notes(root)
+---@param folder string  vault-relative folder to scan, "" for the whole vault
+---@return table[]  every markdown note in `folder`, skipping dot folders
+function M.notes(root, folder)
   local notes = {}
-  for rel, kind in vim.fs.dir(root, {
+  local dir = folder == "" and root or (root .. "/" .. folder)
+  if not vim.uv.fs_stat(dir) then
+    return notes
+  end
+  local prefix = folder == "" and "" or (folder .. "/")
+  for rel, kind in vim.fs.dir(dir, {
     depth = math.huge,
     skip = function(name)
       return name:sub(1, 1) ~= "."
     end,
   }) do
     if kind == "file" and rel:match("%.md$") then
-      table.insert(notes, new_note(root, rel))
+      table.insert(notes, new_note(root, prefix .. rel))
     end
   end
   return notes

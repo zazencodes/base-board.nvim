@@ -1,15 +1,21 @@
--- Renders a board into a scratch buffer: columns side by side, each card a
--- bordered box. The selected card is always read back from the cursor
--- position, so search and other motions work too.
+-- Renders a board into a scratch buffer: columns as shaded panels with a
+-- colored top edge, each card a filled block. Colors are derived from the
+-- colorscheme's Normal group. The selected card is always read back from the
+-- cursor position, so search and other motions work too.
 
 local board_mod = require("base-board.board")
 
 local M = {}
 
-local WIDTH = 36 -- display width of a column, including card borders
+M.PREFIX = "base-board://"
+
+local WIDTH = 34 -- display width of a column panel
 local GAP = "  "
-local BORDER = "│" -- display width 1
-local HEADER_ROW = 3 -- buffer line of the column headers
+local CARD = WIDTH - 2 -- display width of a card; the panel pads it by 1
+local INNER = CARD - 2 -- display width of a card's text
+local TITLE_LINES = 3
+local TOP = 2 -- buffer lines above the columns
+local HEADER_ROW = TOP + 2 -- buffer line of the column headers
 
 local HELP = {
   "h/l  previous/next column",
@@ -23,11 +29,90 @@ local HELP = {
 
 local ns = vim.api.nvim_create_namespace("base-board")
 
-local function color_group(prefix, color, spec)
-  local name = prefix .. color:gsub("#", "")
-  vim.api.nvim_set_hl(0, name, spec)
+-- Colors -------------------------------------------------------------------
+
+local function to_hex(n)
+  return ("#%06x"):format(n)
+end
+
+local function channels(hex)
+  return tonumber(hex:sub(2, 3), 16), tonumber(hex:sub(4, 5), 16), tonumber(hex:sub(6, 7), 16)
+end
+
+-- Mixes `t` of color `b` into color `a`.
+local function blend(a, b, t)
+  local ar, ag, ab = channels(a)
+  local br, bg, bb = channels(b)
+  local function mix(x, y)
+    return math.floor(x + (y - x) * t + 0.5)
+  end
+  return ("#%02x%02x%02x"):format(mix(ar, br), mix(ag, bg), mix(ab, bb))
+end
+
+-- Text color for a chip, chosen like Base Board by the background's luminance.
+local function chip_fg(hex)
+  local r, g, b = channels(hex)
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5 and "#1a1a1a" or "#ffffff"
+end
+
+-- Defines the shared highlight groups and returns the palette.
+local function palette()
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  -- Without a Normal background the terminal's own shows through.
+  local dark = vim.o.background == "dark"
+  local bg = normal.bg and to_hex(normal.bg) or (dark and "#000000" or "#ffffff")
+  local fg = normal.fg and to_hex(normal.fg) or (dark and "#ffffff" or "#000000")
+  local p = {
+    bg = bg,
+    fg = fg,
+    panel = blend(bg, fg, 0.04),
+    card = blend(bg, fg, 0.09),
+    muted = blend(fg, bg, 0.45),
+  }
+  local set = vim.api.nvim_set_hl
+  set(0, "BaseBoardTitle", { fg = fg, bold = true })
+  set(0, "BaseBoardMuted", { fg = p.muted })
+  set(0, "BaseBoardPanel", { bg = p.panel })
+  set(0, "BaseBoardPanelEdge", { fg = p.panel })
+  set(0, "BaseBoardColumnTitle", { fg = fg, bg = p.panel, bold = true })
+  set(0, "BaseBoardPanelMuted", { fg = p.muted, bg = p.panel })
+  set(0, "BaseBoardCard", { fg = fg, bg = p.card })
+  set(0, "BaseBoardCardTitle", { fg = fg, bg = p.card, bold = true })
+  set(0, "BaseBoardCardMuted", { fg = p.muted, bg = p.card })
+  set(0, "BaseBoardCardEdge", { fg = p.card, bg = p.panel })
+  return p
+end
+
+-- Highlight groups for one column's accent color, plain and for its selected
+-- card.
+local function accent_groups(p, accent)
+  local id = accent:gsub("#", "")
+  local sel = blend(p.card, accent, 0.18)
+  local groups = {
+    accent = { "BaseBoardAccent" .. id, { fg = accent, bg = p.panel } },
+    count = { "BaseBoardCount" .. id, { fg = accent, bg = blend(p.panel, accent, 0.2), bold = true } },
+    sel = { "BaseBoardSel" .. id, { fg = p.fg, bg = sel } },
+    sel_title = { "BaseBoardSelTitle" .. id, { fg = p.fg, bg = sel, bold = true } },
+    sel_muted = { "BaseBoardSelMuted" .. id, { fg = p.muted, bg = sel } },
+    sel_edge = { "BaseBoardSelEdge" .. id, { fg = sel, bg = p.panel } },
+    sel_bar = { "BaseBoardSelBar" .. id, { bg = accent } },
+    sel_bar_edge = { "BaseBoardSelBarEdge" .. id, { fg = accent, bg = p.panel } },
+  }
+  local names = {}
+  for key, group in pairs(groups) do
+    vim.api.nvim_set_hl(0, group[1], group[2])
+    names[key] = group[1]
+  end
+  return names
+end
+
+local function tag_group(color)
+  local name = "BaseBoardTag" .. color:gsub("#", "")
+  vim.api.nvim_set_hl(0, name, { fg = chip_fg(color), bg = color })
   return name
 end
+
+-- Text ---------------------------------------------------------------------
 
 local function width(text)
   return vim.fn.strdisplaywidth(text)
@@ -48,6 +133,44 @@ local function fit(text, w)
   return text .. (" "):rep(w - width(text))
 end
 
+-- Word-wraps `text` into at most `max` lines of `w` cells; the last line ends
+-- in an ellipsis if text is left over.
+local function wrap(text, w, max)
+  local lines = {}
+  local line = ""
+  for _, word in ipairs(vim.split(text, " ", { trimempty = true })) do
+    local candidate = line == "" and word or (line .. " " .. word)
+    if width(candidate) <= w then
+      line = candidate
+    else
+      if line ~= "" then
+        table.insert(lines, line)
+      end
+      line = word
+      while width(line) > w do
+        local head = vim.fn.strcharpart(line, 0, w)
+        while width(head) > w do
+          head = vim.fn.strcharpart(head, 0, vim.fn.strchars(head) - 1)
+        end
+        table.insert(lines, head)
+        line = vim.fn.strcharpart(line, vim.fn.strchars(head))
+      end
+    end
+  end
+  if line ~= "" then
+    table.insert(lines, line)
+  end
+  if #lines > max then
+    lines = vim.list_slice(lines, 1, max)
+    local last = lines[max]
+    while width(last .. "…") > w do
+      last = vim.fn.strcharpart(last, 0, vim.fn.strchars(last) - 1)
+    end
+    lines[max] = vim.trim(last) .. "…"
+  end
+  return lines
+end
+
 local function field_text(value)
   if type(value) == "table" then
     return table.concat(vim.tbl_map(tostring, value), ", ")
@@ -55,124 +178,217 @@ local function field_text(value)
   return tostring(value)
 end
 
--- Builds the lines of one column. Each line is a list of {text, hl} segments
--- with a total display width of WIDTH. Records the line range of each card.
-local function column_lines(board, column)
-  local accent = column.color and color_group("BaseBoardColumn", column.color, { fg = column.color }) or "FloatBorder"
-  local count = " " .. #column.cards
-  local lines = {
-    {
-      { "▍", accent },
-      { fit(" " .. column.name, WIDTH - 1 - width(count)), "BaseBoardHeader" },
-      { count, "BaseBoardMuted" },
-    },
-    { { (" "):rep(WIDTH) } },
-  }
-  local inner = WIDTH - 4
-  for _, card in ipairs(column.cards) do
-    card.top = #lines + 1
-    table.insert(lines, { { "╭" .. ("─"):rep(WIDTH - 2) .. "╮", accent } })
-    table.insert(lines, {
-      { BORDER .. " ", accent },
-      { fit(card.note.name, inner), "BaseBoardTitle" },
-      { " " .. BORDER, accent },
-    })
-    local fm = card.note:frontmatter()
-    for _, field in ipairs(board.fields) do
-      local value = fm[field.key]
-      if value ~= nil and value ~= "" and not (type(value) == "table" and #value == 0) then
-        local segments = { { BORDER .. " ", accent } }
-        if field.key == "tags" then
-          local used = 0
-          for _, tag in ipairs(type(value) == "table" and value or { value }) do
-            local chip = "#" .. tostring(tag)
-            if used + width(chip) > inner then
-              break
-            end
-            local color = board.tag_colors[tostring(tag)]
-            local hl = color and color_group("BaseBoardTag", color, { fg = "#1e1e2e", bg = color }) or "BaseBoardMuted"
-            table.insert(segments, { chip, hl })
-            used = used + width(chip)
-            if used < inner then
-              table.insert(segments, { " " })
-              used = used + 1
-            end
-          end
-          table.insert(segments, { (" "):rep(inner - used) })
-        else
-          local label = field.label .. ": "
-          table.insert(segments, { fit(label, math.min(width(label), inner)), "BaseBoardMuted" })
-          table.insert(segments, { fit(field_text(value), inner - math.min(width(label), inner)) })
-        end
-        table.insert(segments, { " " .. BORDER, accent })
-        table.insert(lines, segments)
-      end
-    end
-    table.insert(lines, { { "╰" .. ("─"):rep(WIDTH - 2) .. "╯", accent } })
-    card.bottom = #lines
+-- Layout -------------------------------------------------------------------
+
+-- A segment is { text, hl, sel_hl }: `sel_hl` replaces `hl` while the
+-- segment's card is selected. Each column line is a list of segments with a
+-- total display width of WIDTH.
+
+-- The lines of one card, each CARD cells wide: a half-block top edge, the
+-- tags, the wrapped title, the fields and a half-block bottom edge.
+local function card_lines(board, card, g)
+  local fm = card.note:frontmatter()
+  local function row(segments)
+    local line = { { " ", "BaseBoardCard", g.sel_bar } }
+    vim.list_extend(line, segments)
+    table.insert(line, { " ", "BaseBoardCard", g.sel })
+    return line
   end
+  local lines = {
+    { { "▄", "BaseBoardCardEdge", g.sel_bar_edge }, { ("▄"):rep(CARD - 1), "BaseBoardCardEdge", g.sel_edge } },
+  }
+
+  local tags = board_mod.tags(fm)
+  if #tags > 0 then
+    local segments, used = {}, 0
+    for _, tag in ipairs(tags) do
+      local chip = " " .. tag .. " "
+      local gap = used > 0 and 1 or 0
+      if used + gap + width(chip) > INNER then
+        break
+      end
+      if gap > 0 then
+        table.insert(segments, { " ", "BaseBoardCard", g.sel })
+      end
+      table.insert(segments, { chip, tag_group(board_mod.tag_color(board, tag)) })
+      used = used + gap + width(chip)
+    end
+    table.insert(segments, { (" "):rep(INNER - used), "BaseBoardCard", g.sel })
+    table.insert(lines, row(segments))
+  end
+
+  card.title_line = #lines + 1
+  for _, text in ipairs(wrap(card.note.name, INNER, TITLE_LINES)) do
+    table.insert(lines, row({ { fit(text, INNER), "BaseBoardCardTitle", g.sel_title } }))
+  end
+
+  for _, field in ipairs(board.fields) do
+    local value = fm[field.key]
+    if value ~= nil and value ~= "" and not (type(value) == "table" and #value == 0) then
+      local label = field.label .. "  "
+      local label_w = math.min(width(label), INNER)
+      table.insert(
+        lines,
+        row({
+          { fit(label, label_w), "BaseBoardCardMuted", g.sel_muted },
+          { fit(field_text(value), INNER - label_w), "BaseBoardCard", g.sel },
+        })
+      )
+    end
+  end
+
+  table.insert(lines, {
+    { "▀", "BaseBoardCardEdge", g.sel_bar_edge },
+    { ("▀"):rep(CARD - 1), "BaseBoardCardEdge", g.sel_edge },
+  })
   return lines
 end
 
-local function define_highlights()
-  vim.api.nvim_set_hl(0, "BaseBoardHeader", { default = true, link = "Title" })
-  vim.api.nvim_set_hl(0, "BaseBoardTitle", { default = true, bold = true })
-  vim.api.nvim_set_hl(0, "BaseBoardMuted", { default = true, link = "Comment" })
+-- Builds the lines of one column panel and records each card's line range
+-- (relative to the panel) in the card.
+local function column_lines(board, column, p)
+  local accent = column.color or p.muted
+  local g = accent_groups(p, accent)
+  local count = " " .. #column.cards .. " "
+  local function blank()
+    return { { (" "):rep(WIDTH), "BaseBoardPanel" } }
+  end
+  local lines = {
+    { { ("▀"):rep(WIDTH), g.accent } },
+    {
+      { " ", "BaseBoardPanel" },
+      { fit(column.name, WIDTH - 3 - width(count)), "BaseBoardColumnTitle" },
+      { count, g.count },
+      { "  ", "BaseBoardPanel" },
+    },
+    blank(),
+  }
+  if #column.cards == 0 then
+    table.insert(lines, { { " ", "BaseBoardPanel" }, { fit("No cards", WIDTH - 1), "BaseBoardPanelMuted" } })
+  end
+  for _, card in ipairs(column.cards) do
+    card.top = #lines + 1
+    for _, line in ipairs(card_lines(board, card, g)) do
+      local panel_line = { { " ", "BaseBoardPanel" } }
+      for _, seg in ipairs(line) do
+        table.insert(panel_line, { seg[1], seg[2], seg[3], card = card })
+      end
+      table.insert(panel_line, { " ", "BaseBoardPanel" })
+      table.insert(lines, panel_line)
+    end
+    card.bottom = #lines
+    card.title_line = card.top + card.title_line - 1
+  end
+  table.insert(lines, { { ("▀"):rep(WIDTH), "BaseBoardPanelEdge" } })
+  return lines
 end
 
 -- Card line ranges are relative to the first column line; this is the offset.
 local function card_row(card, field)
-  return HEADER_ROW - 1 + card[field]
+  return TOP + card[field]
+end
+
+-- Highlights the board, with `selected` (a card or nil) in its selected style.
+local function paint(state, selected)
+  local buf = state.buf
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  for _, mark in ipairs(state.marks) do
+    local hl = mark.card == selected and mark.sel_hl or mark.hl
+    vim.api.nvim_buf_set_extmark(buf, ns, mark.row, mark.start, { end_col = mark.stop, hl_group = hl })
+  end
+  state.painted = selected
 end
 
 local function render(state)
-  define_highlights()
+  local p = palette()
   local board = state.board
   local columns = {}
   local height = 0
   for i, column in ipairs(board.columns) do
-    columns[i] = column_lines(board, column)
+    columns[i] = column_lines(board, column, p)
     height = math.max(height, #columns[i])
   end
 
   local total = 0
+  local seen, tags = {}, {}
   for _, column in ipairs(board.columns) do
     total = total + #column.cards
-  end
-  local lines = { (" %s  ·  %d cards  ·  ? for keys"):format(board.name, total), "" }
-  local marks = { { 0, 1, 1 + #board.name, "BaseBoardHeader" } }
-  state.offsets = {}
-  for row = 1, height do
-    local parts = {}
-    local byte = 0
-    local offsets = {}
-    for i, column in ipairs(columns) do
-      offsets[i] = byte
-      for _, seg in ipairs(column[row] or { { (" "):rep(WIDTH) } }) do
-        if seg[2] then
-          table.insert(marks, { HEADER_ROW - 2 + row, byte, byte + #seg[1], seg[2] })
+    for _, card in ipairs(column.cards) do
+      for _, tag in ipairs(board_mod.tags(card.note:frontmatter())) do
+        if not seen[tag] then
+          seen[tag] = true
+          table.insert(tags, tag)
         end
-        table.insert(parts, seg[1])
-        byte = byte + #seg[1]
-      end
-      if i < #columns then
-        table.insert(parts, GAP)
-        byte = byte + #GAP
       end
     end
-    state.offsets[HEADER_ROW - 1 + row] = offsets
-    table.insert(lines, table.concat(parts))
   end
+
+  -- The title line: board name, card count, tag legend and the help hint.
+  local marks = {}
+  local title = {
+    { " ", nil },
+    { board.name, "BaseBoardTitle" },
+    { ("   %d cards"):format(total), "BaseBoardMuted" },
+    { "   ", nil },
+  }
+  for _, tag in ipairs(tags) do
+    table.insert(title, { " " .. tag .. " ", tag_group(board_mod.tag_color(board, tag)) })
+    table.insert(title, { " ", nil })
+  end
+  table.insert(title, { "  ? keys", "BaseBoardMuted" })
+
+  local function emit(row, segments)
+    local parts, byte = {}, 0
+    local offsets = {}
+    for _, seg in ipairs(segments) do
+      if seg.column then
+        offsets[seg.column] = byte
+      end
+      if seg[2] then
+        table.insert(marks, {
+          row = row,
+          start = byte,
+          stop = byte + #seg[1],
+          hl = seg[2],
+          sel_hl = seg[3] or seg[2],
+          card = seg.card,
+        })
+      end
+      table.insert(parts, seg[1])
+      byte = byte + #seg[1]
+    end
+    return table.concat(parts), offsets
+  end
+
+  local lines = { (emit(0, title)), "" }
+  state.offsets = {}
+  for row = 1, height do
+    local segments = {}
+    for i, column in ipairs(columns) do
+      local first = true
+      for _, seg in ipairs(column[row] or { { (" "):rep(WIDTH) } }) do
+        if first then
+          seg.column = i
+          first = false
+        end
+        table.insert(segments, seg)
+      end
+      if i < #columns then
+        table.insert(segments, { GAP })
+      end
+    end
+    local line, offsets = emit(TOP + row - 1, segments)
+    state.offsets[TOP + row] = offsets
+    table.insert(lines, line)
+  end
+  state.marks = marks
 
   local buf = state.buf
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.bo[buf].modified = false
-  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  for _, mark in ipairs(marks) do
-    vim.api.nvim_buf_set_extmark(buf, ns, mark[1], mark[2], { end_col = mark[3], hl_group = mark[4] })
-  end
+  paint(state, nil)
 end
 
 -- Returns the column index and card index (or nil on a header) under the
@@ -194,12 +410,21 @@ local function selection(state)
   return ci, nil
 end
 
--- Places the cursor on a card (or the header of an empty column) and scrolls
--- horizontally so the whole column is visible.
+-- Repaints when the card under the cursor changed.
+local function track_selection(state)
+  local ci, k = selection(state)
+  local card = k and state.board.columns[ci].cards[k]
+  if card ~= state.painted then
+    paint(state, card)
+  end
+end
+
+-- Places the cursor on a card's title (or the header of an empty column) and
+-- scrolls horizontally so the whole column is visible.
 local function focus(state, ci, k)
   local card = k and state.board.columns[ci].cards[k]
-  local row = card and card_row(card, "top") + 1 or HEADER_ROW
-  local col = state.offsets[row][ci] + (card and #(BORDER .. " ") or 0)
+  local row = card and card_row(card, "title_line") or HEADER_ROW
+  local col = state.offsets[row][ci] + (card and 2 or 1)
   vim.api.nvim_win_set_cursor(0, { row, col })
   local left = (ci - 1) * (WIDTH + #GAP)
   local view = vim.fn.winsaveview()
@@ -210,6 +435,7 @@ local function focus(state, ci, k)
     view.leftcol = math.max(0, left + WIDTH - win_width)
   end
   vim.fn.winrestview({ leftcol = view.leftcol })
+  track_selection(state)
 end
 
 local function focus_path(state, path, fallback_ci)
@@ -284,6 +510,26 @@ local function open_card(state)
   end
 end
 
+local augroup = vim.api.nvim_create_augroup("base-board-view", {})
+
+-- Board state by buffer, for repainting on a colorscheme change.
+local boards = {}
+
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = augroup,
+  callback = function()
+    for buf, state in pairs(boards) do
+      if vim.api.nvim_buf_is_valid(buf) then
+        local selected = state.painted
+        render(state)
+        paint(state, selected)
+      else
+        boards[buf] = nil
+      end
+    end
+  end,
+})
+
 local function attach(state)
   local buf = state.buf
   local function map(lhs, fn)
@@ -304,33 +550,47 @@ local function attach(state)
   map("q", function() vim.api.nvim_buf_delete(buf, { force = true }) end)
   map("?", function() vim.notify(table.concat(HELP, "\n"), vim.log.levels.INFO, { title = "base-board" }) end)
 
-  -- Notes may have changed while the board was hidden.
-  vim.api.nvim_create_autocmd("BufEnter", {
+  vim.api.nvim_clear_autocmds({ group = augroup, buffer = buf })
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    group = augroup,
     buffer = buf,
     callback = function()
-      reload(state)
+      track_selection(state)
+    end,
+  })
+  boards[buf] = state
+  -- Notes may have changed while the board was hidden.
+  vim.api.nvim_create_autocmd("BufLeave", {
+    group = augroup,
+    buffer = buf,
+    callback = function()
+      state.hidden = true
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = augroup,
+    buffer = buf,
+    callback = function()
+      if state.hidden then
+        state.hidden = false
+        reload(state)
+      end
     end,
   })
 end
 
---- Opens (or switches to) the board for a `.base` file in the current window.
----@param base_path string
-function M.open(base_path)
-  local name = "base-board://" .. base_path
-  local existing = vim.fn.bufnr(name)
-  if existing ~= -1 then
-    vim.api.nvim_set_current_buf(existing)
-    return
-  end
-
-  local board = board_mod.load(base_path)
-  local buf = vim.api.nvim_create_buf(true, true)
-  vim.api.nvim_buf_set_name(buf, name)
+--- Renders the board into `buf`, named `base-board://<path to .base>`. Runs
+--- whenever Neovim reads such a buffer: from M.open, `:edit` or a restored
+--- session.
+---@param buf integer
+function M.load(buf)
+  local base_path = vim.api.nvim_buf_get_name(buf):sub(#M.PREFIX + 1)
+  vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "hide"
+  vim.bo[buf].swapfile = false
   vim.bo[buf].filetype = "base-board"
-  local state = { buf = buf, board = board }
+  local state = { buf = buf, board = board_mod.load(base_path) }
   render(state)
-  vim.api.nvim_set_current_buf(buf)
   for option, value in pairs({
     wrap = false,
     number = false,
@@ -340,11 +600,18 @@ function M.open(base_path)
     cursorline = false,
     spell = false,
     sidescrolloff = 0,
+    fillchars = "eob: ",
   }) do
     vim.wo[0][0][option] = value
   end
   attach(state)
   focus_path(state, nil, 1)
+end
+
+--- Opens (or switches to) the board for a `.base` file in the current window.
+---@param base_path string
+function M.open(base_path)
+  vim.cmd.edit(vim.fn.fnameescape(M.PREFIX .. base_path))
 end
 
 return M

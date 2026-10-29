@@ -158,6 +158,27 @@ local function evaluate_string(expr, note)
   return result
 end
 
+--- The folder every matching note must be in: a `file.inFolder(...)` the
+--- filter requires through `and` groups alone, or nil if there is none.
+---@param filter table|string|nil
+---@return string|nil
+function M.required_folder(filter)
+  if type(filter) == "string" then
+    local folder = filter:match([[^%s*file%.inFolder%(%s*"([^"]*)"%s*%)%s*$]])
+      or filter:match([[^%s*file%.inFolder%(%s*'([^']*)'%s*%)%s*$]])
+    return folder and (folder:gsub("/$", ""))
+  end
+  if type(filter) == "table" and filter["and"] then
+    for _, child in ipairs(filter["and"]) do
+      local folder = M.required_folder(child)
+      if folder then
+        return folder
+      end
+    end
+  end
+  return nil
+end
+
 ---@param filter table|string|nil  a Bases filter (string or and/or/not group)
 ---@param note table  a vault note (see vault.lua)
 ---@return boolean
